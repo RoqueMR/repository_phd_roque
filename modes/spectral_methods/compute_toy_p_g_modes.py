@@ -126,6 +126,7 @@ plt.hlines(
     linestyles='-'
 )
 
+
 # Similar plot adjustments as in FIGURE 2 in the article
 plt.xscale('log')
 plt.yscale('log')
