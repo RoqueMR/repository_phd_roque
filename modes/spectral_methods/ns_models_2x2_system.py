@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.integrate import cumulative_trapezoid, trapezoid
-from spectral import AB_2x2_system
+from .spectral import AB_2x2_system
 
 
 
