@@ -249,6 +249,7 @@ class BSkEOS:
         kF = self.fermi_momentum_kF(n) * u.fm**-1
         F53 = self.F_x(n, 5.0 / 3.0)
         F83 = self.F_x(n, 8.0 / 3.0)
+        # DELETE AFTER DEBUGGINGGGGGGGGGGGGGGG 
         print("eta", eta)
         print("kF", kF)
         print("F53", F53)
@@ -270,6 +271,7 @@ class BSkEOS:
         x3 = p["x3"]
         x4 = p["x4"]
         x5 = p["x5"]
+        # DELETE AFTER DEBUGGINGGGGGGGGGGGGGGG 
         print("Params:", al, be, ga, t0, t1, t2, t3, t4, t5, t2x2, x0, x1, x3, x4, x5)
 
         n_fm3 = n * u.fm**-3
@@ -298,7 +300,7 @@ class BSkEOS:
         part17 = (3.0 * ga + 5.0) / 40.0 * t5 * n_fm3**(ga + 2.0) * kF**2
         part18 = (2.0 + x5) * F53
         part19 = (0.5 + x5) * F83
-        
+        # DELETE AFTER DEBUGGINGGGGGGGGGGGGGGG 
         print(part1)
         print(part2)
         print(part3)
@@ -327,6 +329,119 @@ class BSkEOS:
             + part14 * (part15 - part16)
             + part17 * (part18 - part19)
             ).to_value(u.MeV / u.fm**3))
+
+    def compton_wlength(self, m_lept):
+        """
+        Compton wavelength of the lepton (e or mu)
+        See below eq. (B1) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float): associated Compton wavelength [fm]
+        """
+        m_kg = m_lept * u.kg
+        return (cc.hbar / (m_kg * cc.c)).to_value(u.fm)
+
+    def x_function(self, n_lept, m_lept):
+        """
+        Function x in eq. (B1) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): x in eq. (B1) [adim]
+        """
+        lam = self.compton_wlength(m_lept)
+        return lam * (3.0 * np.pi**2 * n_lept)**(1.0 / 3.0)
+
+    def f_function(self, n_lept, m_lept):
+        """
+        Function f in eq. (B14) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): f in eq. (B14) [adim]
+        """
+
+        x = self.x_function(n_lept, m_lept)
+        return (
+            (2.0 * x**3 - 3.0 * x) * np.sqrt(1.0 + x**2)
+            + 3.0 * np.arcsinh(x)
+            )
+
+    def lepton_kin_pressure(self, n_lept, m_lept):
+        """
+        Kinetic lepton (e or mu) pressure P^kin in eq. (B15)
+        in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): P^kin in eq. (B15) [MeV fm^-3]
+        """
+        f = self.f_function(n_lept, m_lept)
+        m_kg = m_lept * u.kg
+        lam = self.compton_wlength(m_lept) * u.fm
+        numerator = m_kg * cc.c**2 * f
+        denominator = 24.0 * np.pi**2 * lam**3
+        return (numerator / denominator).to_value(u.MeV * u.fm**-3)
+
+    def exchange_ener_dens(self, n_lept, m_lept):
+        """
+        Exchange energy density (for e or mu) in eq. (B9)
+        in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): E^ex in eq. (B9) [MeV fm^-3]
+        """
+        m_kg = m_lept * u.kg
+        lam = self.compton_wlength(m_lept) * u.fm
+        x = self.x_function(n_lept, m_lept)
+
+        part1 = cc.alpha.value * m_kg * cc.c**2 * x**4
+        part2 = 4.0 * (np.pi * lam)**3
+        part3 = np.sqrt(1.0 + x**2) / x - np.arcsinh(x) / x**2
+        part4 = 1.0 - (3.0 / 2.0) * part3**2
+        return (-part1 / part2 * part4).to_value(u.MeV * u.fm**-3)
+
+    def lepton_exchange_pressure(self, n_lept, m_lept):
+        """
+        Exchange lepton (e or mu) pressure P^ex in eq. (B17)
+        in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): P^ex in eq. (B17) [MeV fm^-3]
+        """
+        m_kg = m_lept * u.kg
+        e_ex = self.exchange_ener_dens(n_lept, m_lept) * u.MeV * u.fm**-3
+        lam = self.compton_wlength(m_lept) * u.fm
+        x = self.x_function(n_lept, m_lept)
+
+        part1 = e_ex / 3.0
+        part2 = cc.alpha.value * m_kg * cc.c**2 * x**3
+        part3 = 2.0 * (np.pi * lam)**3
+        part4 = 1.0 / np.sqrt(1.0 + x**2) - np.arcsinh(x) / x
+        part5 = np.sqrt(1.0 + x**2) / x - np.arcsinh(x) / x**2
+        return (
+            (part1 - part2 * part4 * part5 / part3).to_value(u.MeV * u.fm**-3)
+            )
 
 
 def load_eos(name: str) -> BSkEOS:
