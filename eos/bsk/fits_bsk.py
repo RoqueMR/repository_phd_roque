@@ -15,7 +15,7 @@ this_files_path = Path(__file__).resolve().parent
 # BSk .yaml file path
 bsk_yaml_path = this_files_path / "parameters_bsk.yaml"
 # Open .yaml path in reading mode
-with open(bsk_yaml_path) as f:
+with open(bsk_yaml_path, "r") as f:
     bsk_params_raw = yaml.safe_load(f)  # Load .yaml file
 
 
@@ -119,22 +119,22 @@ class BSkEOS:
         P_MeVfm3 = 10.0**log10_P * u.MeV / u.fm**3
         return P_MeVfm3.value
 
-    def e_fraction_core_Ye(self, n):
+    def e_num_dens_core(self, n):
         """
-        Parameterization of the electron fraction Y_e in the core
-        See eq. (C17) in https://doi.org/10.1093/mnras/sty2413
+        Electron num. density in core via the parameterization of Y_e
+        in eq. (C17) in https://doi.org/10.1093/mnras/sty2413
 
         Args:
             n (float or numpy.ndarray): baryon number density [fm^-3]
 
         Returns:
-            (float or numpy.ndarray): e fraction Y_e in the core
+            (float or numpy.ndarray): e num. density in the core [fm^-3]
         """
         p_values = self.load_p_i_coefficients("TableC7")
         p1, p2, p3, p4, p5, p6, p7 = p_values
         numerator = p1 + p2 * n + p6 * n**(3.0 / 2.0) + p3 * n**p7
         denominator = 1.0 + p4 * n**(3.0 / 2.0) + p5 * n**p7
-        return numerator / denominator
+        return n * (numerator / denominator)  # n_e = Y_e * n
 
     def relat_factor_fermi_surf(self, n_lept, m_lept):
         """
@@ -146,7 +146,7 @@ class BSkEOS:
             m_lept (float): e or mu mass [kg]
 
         Returns:
-            (float or numpy.ndarray): rel. factor at the Fermi surface
+            (float or numpy.ndarray): rel. factor at the Fermi surface [adim]
         """
         n_fm3 = n_lept * u.fm**-3
         m_kg = m_lept * u.kg
@@ -154,32 +154,180 @@ class BSkEOS:
         part2 = (3.0 * np.pi**2 * n_fm3)**(1.0 / 3.0)
         return (part1 * part2).value
 
-    def muon_num_dens_core(self, n_e):
+    def mu_num_dens_core(self, n):
         """
         Parameterization of the muon number density in the core
         See eq. (C16) in https://doi.org/10.1093/mnras/sty2413
 
         Args:
-            n_e (numpy.ndarray): e number densities in core [fm^-3]
+            n (float or numpy.ndarray): baryon num. densities in core [fm^-3]
 
         Returns:
-            (numpy.ndarray): mu number densities in core [fm^-3]
+            (float or numpy.ndarray): mu number densities in core [fm^-3]
         """
-        n_mu_list = []
-        xe = self.relat_factor_fermi_surf(n_e, cc.m_e.value)
+        n_arr = np.asarray(n)
+        # if n_e is a float, returns arr with that float, otherw same arr
+        n_e_arr = self.e_num_dens_core(n_arr)
+        xe = self.relat_factor_fermi_surf(n_e_arr, cc.m_e.value)
         part1 = 1.0 / (3.0 * np.pi**2)
-        part2 = (cc.m_e * cc.c / cc.hbar).to(u.fm**-1).value
-        for x in xe:
-            if (1.0 + xe**2) > (((cc.m_mu / cc.m_e)**2).value):
-                part3 = np.sqrt(1.0 + xe**2 - (m_mu.value / cc.m_e.value)**2) 
-                n_mu_list.append(part1 * (part2 * part3)**3)
-            else:
-                n_mu_list.append(0.0)
-        return np.array(n_mu_list)
+        part2 = (cc.m_e * cc.c / cc.hbar).to_value(u.fm**-1)
+        # n_mu != 0 only if 1 + xe**2 > (m_mu/m_e)**2
+        m_ratio_2 = ((m_mu / cc.m_e).value)**2
+        mask = 1.0 + xe**2 > m_ratio_2
+        part3 = np.zeros_like(xe)
+        part3[mask] = np.sqrt(1.0 + xe[mask]**2 - m_ratio_2)
+
+        n_mu = part1 * (part2 * part3)**3
+        return n_mu.item() if np.isscalar(n_mu) else n_mu
 
     def fermi_momentum_kF(self, n):
-        kF = (3.0 * np.pi**2 * n / 2.0)**(1.0 / 3.0)
-        return kF
+        """
+        Fermi momentum k_F (used in core calculations)
+        See eq. (31) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density in core [fm^-3]
+
+        Returns:
+            (float or numpy.ndarray): Fermi momentum k_F [fm^-1]
+        """
+        return (3.0 * np.pi**2 * n / 2.0)**(1.0 / 3.0)
+
+    def p_num_dens_core(self, n):
+        """
+        Proton num. density in core assuming Y_p = Y_e + Y_mu
+        in eq. (28) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density [fm^-3]
+
+        Returns:
+            (float or numpy.ndarray): proton density in the core [fm^-3]
+        """
+        n_e = self.e_num_dens_core(n)
+        n_mu = self.mu_num_dens_core(n)
+        return n_e + n_mu
+
+    def isospin_asym_eta(self, n):
+        """
+        Isospin asymmetry parameter eta = (n_n - n_p) / n (used in core calcs.)
+        See eq. (32) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density in core [fm^-3]
+
+        Returns:
+            (float or numpy.ndarray): isospin asymmetry param. eta [adim]
+        """
+        n_p = self.p_num_dens_core(n)
+        return 1.0 + 2.0 * n_p / n
+
+    def F_x(self, n, x):
+        """
+        F_x(eta) in eq. (33) in https://doi.org/10.1093/mnras/sty2413
+        used in core calculations
+
+        Args:
+            n (float or numpy.ndarray): baryon number density in core [fm^-3]
+        Returns:
+            (float or numpy.ndarray): F_x(eta) in eq. (33) [adim]
+        """
+        eta = self.isospin_asym_eta(n)
+        return 0.5 * ((1.0 + eta)**x + (1.0 - eta)**x)
+
+    def skyrme_pressure_core(self, n):
+        """
+        Skyrme pressure in the core
+        See eq. (35) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density in core [fm^-3]
+        Returns:
+            (float or numpy.ndarray): P_Skyrme in core [MeV fm^-3]
+        """
+        eta = self.isospin_asym_eta(n)
+        kF = self.fermi_momentum_kF(n) * u.fm**-1
+        F53 = self.F_x(n, 5.0 / 3.0)
+        F83 = self.F_x(n, 8.0 / 3.0)
+        print("eta", eta)
+        print("kF", kF)
+        print("F53", F53)
+        print("F83", F83)
+
+        p = self.params["TABLEII"]
+        al = float(Fraction(p["alpha"]))
+        be = float(Fraction(p["beta"]))
+        ga = float(Fraction(p["gamma"]))
+        t0 = p["t0"] * u.MeV * u.fm**3
+        t1 = p["t1"] * u.MeV * u.fm**5
+        t2 = p["t2"] * u.MeV * u.fm**5
+        t3 = p["t3"] * u.MeV * u.fm**(3.0 + 3.0*al)
+        t4 = p["t4"] * u.MeV * u.fm**(5.0 + 3.0*be)
+        t5 = p["t5"] * u.MeV * u.fm**(5.0 + 3.0*ga)
+        t2x2 = p["t2x2"] * u.MeV * u.fm**5
+        x0 = p["x0"]
+        x1 = p["x1"]
+        x3 = p["x3"]
+        x4 = p["x4"]
+        x5 = p["x5"]
+        print("Params:", al, be, ga, t0, t1, t2, t3, t4, t5, t2x2, x0, x1, x3, x4, x5)
+
+        n_fm3 = n * u.fm**-3
+        part1 = (cc.hbar * kF)**2 * n_fm3 / 10.0
+        part2 = (1.0 + eta)**(5.0 / 3.0) / cc.m_n
+        part3 = (1.0 - eta)**(5.0 / 3.0) / cc.m_p
+
+        part4 = t0 * n_fm3**2 / 8.0
+        part5 = 3.0 - (1.0 + 2.0 * x0) * eta**2
+
+        part6 = t1 * (n_fm3 * kF)**2 / 8.0
+        part7 = (2.0 + x1) * F53
+        part8 = (0.5 + x1) * F83
+
+        part9 = (n_fm3 * kF)**2 / 8.0
+        part10 = (2.0 * t2 + t2x2) * F53
+        part11 = (0.5 * t2 + t2x2) * F83
+
+        part12 = (al + 1.0) / 48.0 * t3 * n_fm3**(al + 2.0)
+        part13 = 3.0 - (1.0 + 2.0 * x3) * eta**2
+
+        part14 = (3.0 * be + 5.0) / 40.0 * t4 * n_fm3**(be + 2.0) * kF**2
+        part15 = (2.0 + x4) * F53
+        part16 = (0.5 + x4) * F83
+
+        part17 = (3.0 * ga + 5.0) / 40.0 * t5 * n_fm3**(ga + 2.0) * kF**2
+        part18 = (2.0 + x5) * F53
+        part19 = (0.5 + x5) * F83
+        
+        print(part1)
+        print(part2)
+        print(part3)
+        print(part4)
+        print(part5)
+        print(part6)
+        print(part7)
+        print(part8)
+        print(part9)
+        print(part10)
+        print(part11)
+        print(part12)
+        print(part13)
+        print(part14)
+        print(part15)
+        print(part16)
+        print(part17)
+        print(part18)
+        print(part19)
+        return ((
+            part1 * (part2 + part3)
+            + part4 * part5
+            + part6 * (part7 - part8)
+            + part9 * (part10 + part11)
+            + part12 * part13
+            + part14 * (part15 - part16)
+            + part17 * (part18 - part19)
+            ).to_value(u.MeV / u.fm**3))
+
 
 def load_eos(name: str) -> BSkEOS:
     """

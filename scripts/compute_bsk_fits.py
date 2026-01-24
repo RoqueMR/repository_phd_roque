@@ -1,9 +1,20 @@
 import numpy as np
 import eos.bsk.fits_bsk as fb
+from astropy import constants as cc
+from astropy import units as u
+import matplotlib.pyplot as plt
 
-n = np.array([0.1, 0.2])
+
+
+n = np.loadtxt("/home/roque/Desktop/nb.txt") 
 
 
 BSk22 = fb.load_eos("BSk22")
+BSk24 = fb.load_eos("BSk24")
+BSk25 = fb.load_eos("BSk25")
+BSk26 = fb.load_eos("BSk26")
 
-print(BSk22.pressure_equilibrium(n))
+
+n_e = BSk22.e_num_dens_core(n)
+
+print(BSk22.isospin_asym_eta(n))
