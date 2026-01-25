@@ -443,6 +443,28 @@ class BSkEOS:
             (part1 - part2 * part4 * part5 / part3).to_value(u.MeV * u.fm**-3)
             )
 
+    def deriv_lept_kin_p_const_comp(self, n, n_lept, m_lept):
+        """
+        Partial deriv. of e (or mu) kinet. pressure at const. e (or mu)
+        composition with respect to the baryon number density. 
+        Deriv. taken from eq. (B15) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density [fm^-3]
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): aforementioned deriv. [MeV]
+        """
+        n_fm3 = n * u.fm**-3
+        x = self.x_function(n_lept, m_lept)
+        m_kg = m_lept * u.kg
+        lam = self.compton_wlength(m_lept) * u.fm
+        part1 = m_kg * cc.c**2 / (24.0 * np.pi**2 * lam**3)
+        part2 = 8.0 * x**5 / (3.0 * n_fm3 * np.sqrt(1.0 + x**2))
+        return (part1 * part2).to_value(u.MeV)
+
 
 def load_eos(name: str) -> BSkEOS:
     """
