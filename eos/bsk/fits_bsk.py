@@ -7,7 +7,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 
-# Muon mass
+# Muon mass [kg]
 m_mu = 1.883531627e-28 * u.kg
 
 
@@ -27,7 +27,7 @@ class BSkEOS:
     def load_p_i_coefficients(self, table_name):
         """
         Function to load coeffs. p_i in Tables C1-C10 in the BSk EOS
-        eos.bsk.parameters_bsk.yaml file
+        eos.bsk.parameters_bsk.yaml file (TABLEII not included)
 
         Args:
             table_name (str): header in .yaml file ("TableC1", "TableC2", etc.)
@@ -52,25 +52,70 @@ class BSkEOS:
         p_values = self.load_p_i_coefficients("TableC1")
         p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14 = p_values
 
-        def w1(n):
-            return 1.0 / (1.0 + p9 * n)
-
-        def w2(n):
-            return 1.0 / (1.0 + (p13 * n)**(p14))
         e_gr = -9.1536  # MeV
-        part1 = (p1 * n)**(7/6)
-        part2 = 1.0 + np.sqrt(p2 * n)
-        part3 = 1.0 + np.sqrt(p3 * n)
-        part4 = 1.0 + np.sqrt(p4 * n)
-        part5 = 1.0 + np.sqrt(p5 * n)
-        part6 = p6 * n**p7 * (1.0 + p8 * n) * (1.0 - w1(n)) * w2(n)
-        part7 = (p10 * n)**p11 * (1.0 - w2(n)) / (1.0 + p12*n)
-        return (
-            e_gr  # constant term
-            + (part1 * part4 * w1(n)) / (part2 * part3 * part5)  # low denss.
-            + part6  # moderate densities
-            + part7  # high densities
-            )
+        # factors appearing in e_eq
+        w1 = 1.0 / (1.0 + p9 * n)  # See eq. (C2)
+        w2 = 1.0 / (1.0 + (p13 * n)**(p14))  # See eq. (C2)
+        A = (p1 * n)**(7.0 / 6.0)
+        B = 1.0 + np.sqrt(p2 * n)
+        C = 1.0 + np.sqrt(p3 * n)
+        D = 1.0 + np.sqrt(p4 * n)
+        E = 1.0 + np.sqrt(p5 * n)
+        F = p6 * p7**7
+        G = (1.0 + p8 * n)
+        H = (1 - w1) * w2
+        II = (p10 * n)**p11
+        J = 1.0 + p12 * n
+        K = 1.0 - w2
+        return e_gr + A * D * w1 / (B * C * E) + F * G * H + II * K / J
+
+    def deriv_eq_e_per_nucleon(self, n):
+        """
+        Derivative of equilib. ener. per nucleon in eq. (C1) in
+        https://doi.org/10.1093/mnras/sty2413 with resp. to mean bar. num. den.
+
+        Args:
+            n (float or numpy.ndarray): mean baryon number density [fm^-3]
+
+        Returns:
+            (float or numpy.ndarray): aforementioned derivative [MeV fm^3]
+        """
+        p_values = self.load_p_i_coefficients("TableC1")
+        p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14 = p_values
+        # factors appearing in e_eq
+        w1 = 1.0 / (1.0 + p9 * n)  # See eq. (C2)
+        w2 = 1.0 / (1.0 + (p13 * n)**(p14))  # See eq. (C2)
+        A = (p1 * n)**(7.0 / 6.0)
+        B = 1.0 + np.sqrt(p2 * n)
+        C = 1.0 + np.sqrt(p3 * n)
+        D = 1.0 + np.sqrt(p4 * n)
+        E = 1.0 + np.sqrt(p5 * n)
+        F = p6 * p7**7
+        G = (1.0 + p8 * n)
+        H = (1 - w1) * w2
+        II = (p10 * n)**p11
+        J = 1.0 + p12 * n
+        K = 1.0 - w2
+        # derivatives with respect to n of the factors above
+        dw1 = -p9 * w1**2
+        dw2 = -p13 * p14 * (p13 * n)**(p14 - 1.0) * w2**2
+        dA = (7.0 * A) / (6.0 * n)
+        dB = p2 / (2.0 * np.sqrt(p2 * n))
+        dC = p3 / (2.0 * np.sqrt(p3 * n))
+        dD = p4 / (2.0 * np.sqrt(p4 * n))
+        dE = p5 / (2.0 * np.sqrt(p5 * n))
+        dF = p6 * p7 * n**(p7 - 1.0)
+        dG = p8
+        dH = dw2 - dw1*w2 - w1*dw2
+        dII = p10 * p11 * n**(p11 - 1.0)
+        dJ = p12
+        dK = -dw2
+        # sum these to get the derivative:
+        term1 = (1.0 / (B*C*E)**2) * B*C*E * (dA*D*w1 + A*(dD*w1 + D*dw1))
+        term2 = -(1.0 / (B*C*E)**2) * A*D*w1 * (dB*C*E + B*(dC*E + C*dE))
+        term3 = dF*G*H + F*dG*H + F*G*dH
+        term4 = (1.0 / J**2) * (J*dII*K + J*II*dK - II*K*dJ)
+        return term1 + term2 + term3 + term4
 
     def tot_mass_ener_dens(self, n):
         """
@@ -90,7 +135,7 @@ class BSkEOS:
 
     def pressure_equilibrium(self, n):
         """
-        Analytical fit of the pressure in the equilibrium condiguration
+        Analytical fit of the pressure in the equilibrium configuration
         See eq. (C4) in https://doi.org/10.1093/mnras/sty2413
 
         Args:
@@ -99,33 +144,114 @@ class BSkEOS:
         Returns:
             (float or numpy.ndarray): pressure in the eq. conf. [MeV fm^-3]
         """
+        def exp_subfunc(xi, pi, pd):
+            return 1.0 / (np.exp(pi * (pd - xi)) + 1.0)
         p_values = self.load_p_i_coefficients("TableC2")
         (
             p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13,
             p14, p15, p16, p17, p18, p19, p20, p21, p22, p23
         ) = p_values
-        K = -33.2047  # for the pressure to be in [MeV fm^-3]
         rho = self.tot_mass_ener_dens(n)  # rho in [g / cm^3]
         xi = np.log10(rho)
-        part1 = (p1 + p2 * xi + p3 * xi**3) / (1.0 + p4 * xi)
-        part2 = 1.0 / (np.exp(p5 * (xi - p6)) + 1.0)
-        part3 = p7 + p8 * xi
-        part4 = 1.0 / (np.exp(p9 * (p6 - xi)) + 1.0)
-        part5 = p10 + p11 * xi
-        part6 = 1.0 / (np.exp(p12 * (p13 - xi)) + 1.0)
-        part7 = p14 + p15 * xi
-        part8 = 1.0 / (np.exp(p16 * (p17 - xi)) + 1.0)
-        part9 = p18 / (1.0 + (p20 * (xi - p19))**2)
-        part10 = p21 / (1.0 + (p23 * (xi - p22))**2)
+        K = -33.2047  # for the pressure to be in [MeV fm^-3]
+        A = p1 + p2*xi + p3*xi**3
+        B = 1.0 + p4*xi
+        C = 1.0 / (np.exp(p5 * (xi - p6)) * 1.0)
+        C1 = exp_subfunc(xi, p9, p6)
+        C2 = exp_subfunc(xi, p12, p13)
+        C3 = exp_subfunc(xi, p16, p17)
+        D1 = p7 + p8 * xi
+        D2 = p10 + p11 * xi
+        D3 = p14 + p15 * xi
+        E1 = p18 / (1.0 + (p20 * (xi - p19))**2)
+        E2 = p21 / (1.0 + (p23 * (xi - p22))**2)
         log10_P = (
-                K + part1 * part2
-                + part3 * part4
-                + part5 * part6
-                + part7 * part8
-                + part9 + part10
+                K + A * C / B
+                + D1 * C1
+                + D2 * C2
+                + D3 * C3
+                + E1 * E2
                 )
         P_MeVfm3 = 10.0**log10_P * u.MeV / u.fm**3
         return P_MeVfm3.value
+
+    def deriv_pressure_equilibrium(self, n):
+        """
+        Total derivative of the pressure in the equil. config. with respect
+        to the mean baryon number density. See eq. (C4), (C1) and (4) in
+        https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): mean baryon number density [fm^-3]
+
+        Returns:
+            (float or numpy.ndarray): deriv. of pressure in equil. conf. [MeV]
+        """
+        def exp_subfunc(xi, pi, pd):
+            return 1.0 / (np.exp(pi * (pd - xi)) + 1.0)
+
+        def d_exp_subfuc(xi, pi, pd):
+            return exp_subfunc(xi, pi, pd)**2 * pi * np.exp(pi * (pd - xi))
+
+        p_values = self.load_p_i_coefficients("TableC2")
+        (
+            p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13,
+            p14, p15, p16, p17, p18, p19, p20, p21, p22, p23
+        ) = p_values
+
+        rho = self.tot_mass_ener_dens(n)  # rho in [g / cm^3]
+        xi = np.log10(rho)
+
+        K = -33.2047  # for the pressure to be in [MeV fm^-3]
+        A = p1 + p2*xi + p3*xi**3
+        B = 1.0 + p4*xi
+        C = 1.0 / (np.exp(p5 * (xi - p6)) * 1.0)
+        C1 = exp_subfunc(xi, p9, p6)
+        C2 = exp_subfunc(xi, p12, p13)
+        C3 = exp_subfunc(xi, p16, p17)
+        D1 = p7 + p8 * xi
+        D2 = p10 + p11 * xi
+        D3 = p14 + p15 * xi
+        E1 = p18 / (1.0 + (p20 * (xi - p19))**2)
+        E2 = p21 / (1.0 + (p23 * (xi - p22))**2)
+
+        log10_P = (
+                K + A * C / B
+                + D1 * C1
+                + D2 * C2
+                + D3 * C3
+                + E1 * E2
+                )
+        P_MeVfm3 = 10.0**log10_P * u.MeV / u.fm**3
+
+        dA = p2 + 3.0 * p3 * xi**2
+        dB = p4
+        dC = -C**2 * p9 * np.exp(p9 * (p6 - xi))
+        dC1 = d_exp_subfuc(xi, p9, p6)
+        dC2 = d_exp_subfuc(xi, p12, p13)
+        dC3 = d_exp_subfuc(xi, p16, p17)
+        dD1 = p8
+        dD2 = p11
+        dD3 = p15
+        dE1 = -E1**2 * 2.0 * xi * p20 * (p20 * (xi - p19)) / p18
+        dE2 = -E2**2 * 2.0 * xi * p23 * (p23 * (xi - p22)) / p21
+        dlog10_P_dxi = (
+                  ((dA*C + A*dC)*B - A*C*dB) / B**2
+                  + dD1*C1 + D1*dC1
+                  + dD2*C2 + D2*dC2
+                  + dD3*C3 + D3*dC3
+                  + dE1 + dE2
+                  )
+        dxi_drho = 1.0 / (rho * np.log(10.0))
+        deeq_dn = self.deriv_eq_e_per_nucleon(n) * u.MeV * u.fm**3
+        drho_dn = (
+              self.equil_energy_per_nucleon(n) * u.MeV / cc.c**2
+              + cc.m_n
+              + n * u.fm**-3 * deeq_dn / cc.c**2
+              )
+        dP_dxi = np.log(10.0) * P_MeVfm3 * dlog10_P_dxi
+
+        return (dP_dxi * dxi_drho * drho_dn).to_value(u.MeV)
 
     def e_num_dens_core(self, n):
         """
@@ -174,7 +300,7 @@ class BSkEOS:
             (float or numpy.ndarray): mu number densities in core [fm^-3]
         """
         n_arr = np.asarray(n)
-        # if n_e is a float, returns arr with that float, otherw same arr
+        # if n_e float, returns arr w/ that float, otherw same arr
         n_e_arr = self.e_num_dens_core(n_arr)
         xe = self.relat_factor_fermi_surf(n_e_arr, cc.m_e.value)
         part1 = 1.0 / (3.0 * np.pi**2)
@@ -237,6 +363,7 @@ class BSkEOS:
 
         Args:
             n (float or numpy.ndarray): baryon number density in core [fm^-3]
+            x (float): either 5.0 / 3.0 or 8.0 / 3.0
         Returns:
             (float or numpy.ndarray): F_x(eta) in eq. (33) [adim]
         """
@@ -570,8 +697,65 @@ class BSkEOS:
         Returns:
             (float or numpy.ndarray): aforementioned deriv. [MeV]
         """
-        # ADD AFTER DEBUGGINGGGGGGGGGGGGGGG
-        return
+        eta = self.isospin_asym_eta(n)
+        kF = self.fermi_momentum_kF(n) * u.fm**-1
+        F53 = self.F_x(n, 5.0 / 3.0)
+        F83 = self.F_x(n, 8.0 / 3.0)
+
+        p = self.params["TABLEII"]
+        al = float(Fraction(p["alpha"]))
+        be = float(Fraction(p["beta"]))
+        ga = float(Fraction(p["gamma"]))
+        t0 = p["t0"] * u.MeV * u.fm**3
+        t1 = p["t1"] * u.MeV * u.fm**5
+        t2 = p["t2"] * u.MeV * u.fm**5
+        t3 = p["t3"] * u.MeV * u.fm**(3.0 + 3.0*al)
+        t4 = p["t4"] * u.MeV * u.fm**(5.0 + 3.0*be)
+        t5 = p["t5"] * u.MeV * u.fm**(5.0 + 3.0*ga)
+        t2x2 = p["t2x2"] * u.MeV * u.fm**5
+        x0 = p["x0"]
+        x1 = p["x1"]
+        x3 = p["x3"]
+        x4 = p["x4"]
+        x5 = p["x5"]
+
+        n_fm3 = n * u.fm**-3
+        part1 = (cc.hbar**2 / 10.0) * (kF**2 * 5.0 / 3.0)
+        part2 = (1.0 + eta)**(5.0 / 3.0) / cc.m_n
+        part3 = (1.0 - eta)**(5.0 / 3.0) / cc.m_p
+
+        part4 = t0 * n_fm3 / 4.0
+        part5 = 3.0 - (1.0 + 2.0 * x0) * eta**2
+
+        part6 = t1 * n_fm3 * kF**2 / 3.0
+        part7 = (2.0 + x1) * F53
+        part8 = (0.5 + x1) * F83
+
+        part9 = n_fm3 * kF**2 / 3.0
+        part10 = (2.0 * t2 + t2x2) * F53
+        part11 = (0.5 * t2 + t2x2) * F83
+
+        part12 = (al + 1.0) / 48.0 * t3 * (al + 2.0) * n_fm3**(al + 1.0)
+        part13 = 3.0 - (1.0 + 2.0 * x3) * eta**2
+
+        part14 = (3.0 * be + 5.0) / 40.0 * t4 * \
+            n_fm3**(be + 1.0) * kF**2 * (be + 8.0 / 3.0)
+        part15 = (2.0 + x4) * F53
+        part16 = (0.5 + x4) * F83
+
+        part17 = (3.0 * ga + 5.0) / 40.0 * t5 * \
+            n_fm3**(ga + 1.0) * kF**2 * (ga + 8.0 / 3.0)
+        part18 = (2.0 + x5) * F53
+        part19 = (0.5 + x5) * F83
+        return ((
+            part1 * (part2 + part3)
+            + part4 * part5
+            + part6 * (part7 - part8)
+            + part9 * (part10 + part11)
+            + part12 * part13
+            + part14 * (part15 - part16)
+            + part17 * (part18 - part19)
+            ).to_value(u.MeV))
 
 
 def load_eos(name: str) -> BSkEOS:
