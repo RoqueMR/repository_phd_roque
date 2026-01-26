@@ -7,16 +7,15 @@ from pathlib import Path
 from dataclasses import dataclass
 
 
+# Muon mass
 m_mu = 1.883531627e-28 * u.kg
 
 
-# Resolve the directory where this script and the .yaml file are
+# Load .yaml file with BSk22, BSk24, BSk25, BSk26 params.
 this_files_path = Path(__file__).resolve().parent
-# BSk .yaml file path
 bsk_yaml_path = this_files_path / "parameters_bsk.yaml"
-# Open .yaml path in reading mode
 with open(bsk_yaml_path, "r") as f:
-    bsk_params_raw = yaml.safe_load(f)  # Load .yaml file
+    bsk_params_raw = yaml.safe_load(f)
 
 
 @dataclass(frozen=True)
@@ -26,9 +25,18 @@ class BSkEOS:
 
     # ---- analytical fits ----
     def load_p_i_coefficients(self, table_name):
-        p = self.params[table_name]  # table_name is a header in the .yaml file
-        p_values = (p[f"p{i}"] for i in range(1, len(p) + 1))
-        return p_values
+        """
+        Function to load coeffs. p_i in Tables C1-C10 in the BSk EOS
+        eos.bsk.parameters_bsk.yaml file
+
+        Args:
+            table_name (str): header in .yaml file ("TableC1", "TableC2", etc.)
+
+        Returns:
+            (generator): generator yielding p1, p2, ... in corresp. table
+        """
+        p = self.params[table_name]
+        return (p[f"p{i}"] for i in range(1, len(p) + 1))
 
     def equil_energy_per_nucleon(self, n):
         """
@@ -63,7 +71,7 @@ class BSkEOS:
             + part6  # moderate densities
             + part7  # high densities
             )
- 
+
     def tot_mass_ener_dens(self, n):
         """
         Total mass energy density
@@ -395,6 +403,34 @@ class BSkEOS:
         denominator = 24.0 * np.pi**2 * lam**3
         return (numerator / denominator).to_value(u.MeV * u.fm**-3)
 
+    def auxiliar_function(self, x):
+        """
+        Auxiliar function of x: sqrt(1+x**2)/x - arcsinh(x)/x**2
+
+        Args:
+            (float or numpy.ndarray): e (or mu) x as in eq. (B1)
+            in https://doi.org/10.1093/mnras/sty2413
+
+        Returns:
+            (float or numpy.ndarray): aforementioned function of x
+
+        """
+        return np.sqrt(1.0 + x**2) / x - np.arcsinh(x) / x**2
+
+    def auxiliar_derivative(self, x):
+        """
+        Derivative with respect to x of sqrt(1+x**2)/x - arcsinh(x)/x**2
+
+        Args:
+            (float or numpy.ndarray): e (or mu) x as in eq. (B1)
+            in https://doi.org/10.1093/mnras/sty2413 [adim]
+
+        Returns:
+            (float or numpy.ndarray): aforementioned derivative
+
+        """
+        return (-2.0 / x**2) * (1.0 / np.sqrt(1.0 + x**2) + np.arcsinh(x) / x)
+
     def exchange_ener_dens(self, n_lept, m_lept):
         """
         Exchange energy density (for e or mu) in eq. (B9)
@@ -413,9 +449,8 @@ class BSkEOS:
 
         part1 = cc.alpha.value * m_kg * cc.c**2 * x**4
         part2 = 4.0 * (np.pi * lam)**3
-        part3 = np.sqrt(1.0 + x**2) / x - np.arcsinh(x) / x**2
-        part4 = 1.0 - (3.0 / 2.0) * part3**2
-        return (-part1 / part2 * part4).to_value(u.MeV * u.fm**-3)
+        part3 = 1.0 - (3.0 / 2.0) * self.auxiliar_function(x)**2
+        return (-part1 / part2 * part3).to_value(u.MeV * u.fm**-3)
 
     def lepton_exchange_pressure(self, n_lept, m_lept):
         """
@@ -438,7 +473,7 @@ class BSkEOS:
         part2 = cc.alpha.value * m_kg * cc.c**2 * x**3
         part3 = 2.0 * (np.pi * lam)**3
         part4 = 1.0 / np.sqrt(1.0 + x**2) - np.arcsinh(x) / x
-        part5 = np.sqrt(1.0 + x**2) / x - np.arcsinh(x) / x**2
+        part5 = self.auxiliar_function(x)
         return (
             (part1 - part2 * part4 * part5 / part3).to_value(u.MeV * u.fm**-3)
             )
@@ -446,7 +481,7 @@ class BSkEOS:
     def deriv_lept_kin_p_const_comp(self, n, n_lept, m_lept):
         """
         Partial deriv. of e (or mu) kinet. pressure at const. e (or mu)
-        composition with respect to the baryon number density. 
+        composition with respect to the baryon number density.
         Deriv. taken from eq. (B15) in https://doi.org/10.1093/mnras/sty2413
 
         Args:
@@ -464,6 +499,79 @@ class BSkEOS:
         part1 = m_kg * cc.c**2 / (24.0 * np.pi**2 * lam**3)
         part2 = 8.0 * x**5 / (3.0 * n_fm3 * np.sqrt(1.0 + x**2))
         return (part1 * part2).to_value(u.MeV)
+
+    def deriv_exch_e_dens_const_comp(self, n, n_lept, m_lept):
+        """
+        Partial deriv. of e (or mu) exchange ener. dens. at const. e (or mu)
+        composition with respect to the baryon number density.
+        Deriv. taken from eq. (B9) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density [fm^-3]
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): aforementioned deriv. [MeV]
+        """
+        n_fm3 = n * u.fm**-3
+        m_kg = m_lept * u.kg
+        lam = self.compton_wlength(m_lept) * u.fm
+        x = self.x_function(n_lept, m_lept)
+        h = self.auxiliar_function(x)
+        dhdx = self.auxiliar_derivative(x)
+
+        part1 = - cc.alpha * m_kg * cc.c**2 / (4.0 * np.pi**3 * lam**3)
+        part2 = x**4 / n_fm3
+        part3 = 4.0 / 3.0 - 2.0 * h**2 - x * h * dhdx
+        return (part1 * part2 * part3).to_value(u.MeV)
+
+    def deriv_lept_exch_p_const_comp(self, n, n_lept, m_lept):
+        """
+        Partial deriv. of e (or mu) lept. exch. p at const. e (or mu)
+        composition with respect to the baryon number density.
+        Deriv. taken from eq. (B17) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density [fm^-3]
+            n_lept (float or numpy.ndarray): (e or mu) num. dens. [fm^-e]
+            m_lept (float): lepton (e or mu) mass [kg]
+
+        Returns:
+            (float or numpy.ndarray): aforementioned deriv. [MeV]
+        """
+        lam = self.compton_wlength(m_lept) * u.fm
+        m_kg = m_lept * u.kg
+        deex_dn = self.deriv_exch_e_dens_const_comp(n, n_lept, m_lept) * u.MeV
+        x = self.x_function(n_lept, m_lept)
+        h = self.auxiliar_function(x)
+        dhdx = self.auxiliar_derivative(x)
+        dxdn = x / (3.0 * n * u.fm**-3)
+
+        part1 = deex_dn / 3.0
+        part2 = cc.alpha * m_kg * cc.c**2 / (2.0 * np.pi**3 * lam**3)
+        part3 = x**2 * (2.0 - x**2 / (1.0 + x**2)) / np.sqrt(1.0 + x**2)
+        part4 = -2.0 * x * np.arcsinh(x)
+        part5 = x**3 / np.sqrt(1.0 * x**2) - x**2 * np.arcsinh(x)
+        return (
+            part1 - dxdn * part2
+            * (h * (part3 + part4) - dhdx * part5).to_value(u.MeV)
+            )
+
+    def deriv_skyrme_p_const_comp(self, n):
+        """
+        Partial deriv. Skyrme pressure at constant composition
+        with respect to the baryon number density (core calc.)
+        Deriv. taken from eq. (35) in https://doi.org/10.1093/mnras/sty2413
+
+        Args:
+            n (float or numpy.ndarray): baryon number density [fm^-3]
+
+        Returns:
+            (float or numpy.ndarray): aforementioned deriv. [MeV]
+        """
+        # ADD AFTER DEBUGGINGGGGGGGGGGGGGGG
+        return
 
 
 def load_eos(name: str) -> BSkEOS:

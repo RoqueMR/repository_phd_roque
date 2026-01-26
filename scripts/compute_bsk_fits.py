@@ -17,4 +17,7 @@ BSk26 = fb.load_eos("BSk26")
 
 n_e = BSk22.e_num_dens_core(n)
 
-print(BSk22.isospin_asym_eta(n))
+print(type(BSk22.load_p_i_coefficients("TableC1")))
+print(type(np.array(8.0)))
+
+print(cc.alpha *  1.0)
