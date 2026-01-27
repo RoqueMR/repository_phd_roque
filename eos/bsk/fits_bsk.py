@@ -585,7 +585,8 @@ class BSkEOS:
         fac = u.MeV * u.fm**-3
         result = part1 - part2 * part4 * part5 / part3
         result = np.where(x == 0.0, 0.0, result)
-        return (result.item()).to_value(fac) if np.isscalar(x) else result.to_value(fac)
+        scalar_res = (result.item()).to_value(fac)
+        return scalar_res if np.isscalar(x) else result.to_value(fac)
 
     def deriv_lept_kin_p_const_comp(self, n, n_lept, m_lept):
         """
@@ -796,6 +797,7 @@ class BSkEOS:
         dpkine_dn = self.deriv_lept_kin_p_const_comp(n, n_e, cc.m_e.value)
         dpkinmu_dn = self.deriv_lept_kin_p_const_comp(n, n_mu, m_mu.value)
         return dpskyrme_dn + dpexe_dn + dpexmu_dn + dpkine_dn + dpkinmu_dn
+
 
 def load_eos(name: str) -> BSkEOS:
     """
