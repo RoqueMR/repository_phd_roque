@@ -5,8 +5,9 @@ from astropy import units as u
 import matplotlib.pyplot as plt
 
 
+m_mu = 1.883531627e-28 * u.kg
 
-n = np.loadtxt("/home/roque/Desktop/nb.txt") 
+n = np.loadtxt("/home/roque/Desktop/nb.txt")
 
 
 BSk22 = fb.load_eos("BSk22")
@@ -14,7 +15,7 @@ BSk24 = fb.load_eos("BSk24")
 BSk25 = fb.load_eos("BSk25")
 BSk26 = fb.load_eos("BSk26")
 
-
-n_e = BSk22.e_num_dens_core(n)
-
-print(BSk22.deriv_pressure_equilibrium(n))
+print(BSk22.total_deriv_pressure_core(n))
+print(BSk24.total_deriv_pressure_core(n))
+print(BSk25.total_deriv_pressure_core(n))
+print(BSk26.total_deriv_pressure_core(n))
