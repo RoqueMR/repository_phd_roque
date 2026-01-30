@@ -5,6 +5,7 @@ from astropy import units as u
 from fractions import Fraction
 from pathlib import Path
 from dataclasses import dataclass
+from types import MappingProxyType
 
 
 # Muon mass [kg]
@@ -22,6 +23,11 @@ with open(bsk_yaml_path, "r") as f:
 class BSkEOS:
     name: str
     params: dict
+
+    def __post_init__(self):
+        constant_keys = ("n_cc_pasta", "n_cc_no_pasta")
+        constants = {k: self.params[k] for k in constant_keys}
+        object.__setattr__(self, "constants", MappingProxyType(constants))
 
     def load_p_i_coefficients(self, table_name):
         """

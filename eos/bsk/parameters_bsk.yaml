@@ -157,6 +157,10 @@ BSk22:
     p5: 2.41
     p6: 229
     p7: 4.89
+  # From Shchechilin et al. (2023) 
+  # https://doi.org/10.1103/PhysRevC.108.025805
+  n_cc_pasta: 0.071
+  n_cc_no_pasta: 0.071
 
 BSk24:
   # From S. Goriely et al. (2013)
@@ -317,6 +321,10 @@ BSk24:
     p5: 4.63
     p6: 160
     p7: 4.66
+  # From Shchechilin et al. (2023) 
+  # https://doi.org/10.1103/PhysRevC.108.025805
+  n_cc_pasta: 0.082
+  n_cc_no_pasta: 0.081
 
 BSk25:
   # From S. Goriely et al. (2013)
@@ -477,6 +485,10 @@ BSk25:
     p5: 2.78
     p6: 9.8e+4
     p7: 7.96
+  # From Shchechilin et al. (2023) 
+  # https://doi.org/10.1103/PhysRevC.108.025805
+  n_cc_pasta: 0.089
+  n_cc_no_pasta: 0.086
 
 BSk26:
   # From S. Goriely et al. (2013)
@@ -637,3 +649,7 @@ BSk26:
     p5: 0.966
     p6: 71
     p7: 4.47
+  # From Shchechilin et al. (2023) 
+  # https://doi.org/10.1103/PhysRevC.108.025805
+  n_cc_pasta: 0.086
+  n_cc_no_pasta: 0.085
